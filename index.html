@@ -58,6 +58,7 @@
   .colH{width:60px} .colT{width:70px} .colP{width:170px} .colS{width:70px} .colU{width:84px}
   footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
   .hint{background:var(--doing-bg);color:var(--doing);font-size:12px;padding:8px 12px;border-radius:8px;margin-bottom:14px}
+  .items.hide{display:none}
 </style>
 </head>
 <body>
@@ -74,210 +75,195 @@
 </header>
 
 <div class="wrap">
-  <div class="hint">提示：進度與工時填寫後會自動存到「這台瀏覽器」。要與他人同步、或啟用 Telegram 提醒，需後端版本（第二階段）。可用右側「匯出 JSON」備份/交接。</div>
+  <div class="hint">進度即時共用：任何人更新，其他人重新整理（或每 20 秒自動同步）就看得到。每週三 00:00（台灣）自動換頁，上週資料存入「歷史週報」。</div>
   <div class="legend" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-size:13px;color:var(--txt);flex-wrap:wrap">
     <span style="font-weight:500">團隊顏色：</span>
     <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:3px;background:#2563eb;display:inline-block"></span>美國團隊</span>
     <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:3px;background:#0f9d77;display:inline-block"></span>亞洲團隊</span>
+    <span id="sync" style="margin-left:auto;color:var(--muted);font-size:12px"></span>
   </div>
   <div class="toolbar">
     <span id="chips"></span>
     <span style="flex:1"></span>
     <button onclick="expand(true)">全部展開</button>
     <button onclick="expand(false)">全部收合</button>
-    <button onclick="exportJSON()">匯出 JSON</button>
-    <button onclick="document.getElementById('imp').click()">匯入 JSON</button>
-    <input id="imp" type="file" accept="application/json" style="display:none" onchange="importJSON(this)">
+    <button onclick="loadState(true)">重新整理</button>
+    <button onclick="openHistory()">歷史週報</button>
   </div>
   <div id="board"></div>
+  <div id="history" style="display:none;margin-top:16px"></div>
 </div>
-<footer>市場組工作進度追蹤 · 資料來源整併自美國企場 / 亞洲企劃 / Arthur 三表（唯讀匯入，未更動來源）</footer>
+<footer>市場組工作進度追蹤 · 資料整併自美國企場 / 亞洲企劃 / Arthur 三表（唯讀匯入，未更動來源）· 進度由 Cloudflare 後端即時共用</footer>
 
 <script>
-/* ===== 團隊與成員 ===== */
-const TEAMS = {
-  '美國': {cls:'us', color:'#2563eb', members:['聿緯','張譯','貞貞','Abbie','Arthur']},
-  '亞洲': {cls:'asia', color:'#0f9d77', members:['皓皓','Kevin']},
-};
-/* ===== 初始工作項目（整併自三張來源表，唯讀匯入）=====
-   欄位: [團隊, 負責人, 標籤, 工作項目, 預計工時, 備註] */
-const SEED = [
-  // ── 聿緯 ──
-  ['美國','聿緯','SSS','遊戲提交',null,'06/30 全面提交鷹速致富；提前釋出美國戰神500-Dara'],
-  ['美國','聿緯','SSS','遊戲數據週報',null,'週二虎機、週五魚機'],
-  ['美國','聿緯','SSS','遊戲文件更新',null,'惡魔之火 BonusCoin'],
-  ['美國','聿緯','SSS','JILIUS Logo 輸出',null,''],
-  ['美國','聿緯','SSS','Alea 數值設定',null,''],
-  ['美國','聿緯','SSS','4LeafTechnologies 數值設定',null,''],
-  ['美國','聿緯','SSS','Blazesoft 數值設定',null,''],
-  ['美國','聿緯','SSS','Obsidian 研究',null,''],
-  ['美國','聿緯','中艦','06/26 送審協助',null,''],
-  ['美國','聿緯','中艦','主題活動任務',null,'美國戰神500'],
-  ['美國','聿緯','大玩咖','端午養成主題活動第三週數值',null,'07/01~07/07'],
-  ['美國','聿緯','大玩咖','淘氣鯊勳章主題活動送審數值',null,''],
-  // ── 張譯 ──
-  ['美國','張譯','SSS','AM 負責項目',null,'Casimba、GameTech、中國廠商、Dara'],
-  ['美國','張譯','SSS','合約/客戶資料/法規追蹤',null,''],
-  ['美國','張譯','OC','遊戲上線觀察',null,''],
-  ['美國','張譯','OC','合約處理',null,''],
-  ['美國','張譯','其他','虎機競品研究',null,'下次會議 6/29(一)15:30'],
-  // ── 貞貞 (Chloe) ──
-  ['美國','貞貞','SSS','AM 負責項目',null,'Patrianna、Blazesoft'],
-  ['美國','貞貞','SSS','財務對帳',null,''],
-  ['美國','貞貞','SSS','數據報告',null,'日報 + 海外報告'],
-  ['美國','貞貞','SSS','海外會議報告',null,'6/30 海外會議，週四下午看報告'],
-  ['美國','貞貞','SSS','站台流量 / 市場動態追蹤',null,''],
-  // ── Abbie ──
-  ['美國','Abbie','賽馬','資訊站建立',null,'網站結構與內文規劃'],
-  ['美國','Abbie','賽馬','網紅資源與行銷討論',null,''],
-  ['美國','Abbie','賽馬','白牌商瞭解',null,'HP約會議中｜PS評估完成｜AW評估完成'],
-  ['美國','Abbie','賽馬','遊戲商 AM 負責項目',null,'Horseplay、Potent Systems、AmWest'],
-  ['美國','Abbie','賽馬','遊戲商合約簽立 (TaDaUS)',null,'HP等回簽｜PS等亞瑟改｜AW等回簽'],
-  ['美國','Abbie','賽馬','遊戲商財務對帳',null,'HP催帳款｜PS尚未收款｜AW等回簽'],
-  ['美國','Abbie','SSS','AM 負責項目',null,'Alea、Legendz'],
-  // ── Arthur (亞瑟) ──
-  ['美國','Arthur','SSS','新廠商開發',null,''],
-  ['美國','Arthur','SSS','合約與相關資料補齊',null,''],
-  ['美國','Arthur','賽馬','廠商溝通項目與追蹤',null,''],
-  ['美國','Arthur','OC','EM 溝通項目與追蹤',null,'MPA'],
-  ['美國','Arthur','OC','站台商溝通',null,'建群推進、遊戲上線時間確認'],
-  ['美國','Arthur','其他','美國銀行帳戶',null,''],
-  ['美國','Arthur','其他','美國公司',null,''],
-  // ── 亞洲 · 皓皓 ──
-  ['亞洲','皓皓','企劃','Z Gaming Demo',2,''],
-  ['亞洲','皓皓','會議','Demo 會前討論',1,''],
-  ['亞洲','皓皓','企劃','系統商 / 營運商競品研究',5,''],
-  ['亞洲','皓皓','企劃','菲律賓合規執照資料查詢',4,''],
-  ['亞洲','皓皓','企劃','主題活動自動化工具規劃',4,''],
-  ['亞洲','皓皓','營運','營運社團報告',4,''],
-  ['亞洲','皓皓','會議','代理商會議',1,''],
-  ['亞洲','皓皓','營運','每日平台數據',5,''],
-  ['亞洲','皓皓','H5','H5 即時活動設定',2,''],
-  ['亞洲','皓皓','H5','H5 Telegram 社群維護',2,''],
-  ['亞洲','皓皓','H5','H5 行銷資源製作 & 發文設定',4,''],
-  ['亞洲','皓皓','例行','週二例行測試',2,'H5 測試'],
-  ['亞洲','皓皓','例行','週三維護測試',2,'H5 測試'],
-  ['亞洲','皓皓','例行','例行會議',2,'早會/工作會議/策略會議/工作會前會'],
-  ['亞洲','皓皓','例行','剩餘時間',0,''],
-  // ── 亞洲 · Kevin ──
-  ['亞洲','Kevin','飛鷹','大玩咖交接',16,'財會遞延文件/數值更新表單巨集/發文公告工具/客服文件/VIP Q群活動'],
-  ['亞洲','Kevin','主活動','【主】端午養成主題活動第三週數值 07/01~07/07',2,'數值設定、公告設定'],
-  ['亞洲','Kevin','主活動','【主】BINGO 活動工具功能新增與優化',1.5,'功能驗證'],
-  ['亞洲','Kevin','主活動','【主】DWK 七夕情緣主題活動送審數值＆集字換皮＆資源 ingame',2,'協助飛鷹'],
-  ['亞洲','Kevin','主活動','【主】IR & B7 網頁活動設定',1.5,'活動數值設定、虛寶卡資源更新'],
-  ['亞洲','Kevin','主活動','IR & B7 活動 / 禮包數值調整',1.5,'數據追蹤、調整'],
-  ['亞洲','Kevin','主活動','IR & B7 主題活動數值更新',1,'實體獎白名單撈取、掉落物權重調整'],
-  ['亞洲','Kevin','例行','例行廳館排序調整',1,''],
-  ['亞洲','Kevin','例行','例行 APP 推播',1.5,''],
-  ['亞洲','Kevin','例行','週二例行測試',3,''],
-  ['亞洲','Kevin','例行','週三維護測試',2,''],
-  ['亞洲','Kevin','例行','例行會議',1,''],
-  ['亞洲','Kevin','例行','剩餘時間',6,''],
+const API='https://work-progress-api.oldrd4-market.workers.dev';
+const TEAM=[
+  {name:'美國',cls:'us',color:'#2563eb',members:['聿緯','張譯','貞貞','Abbie','Arthur']},
+  {name:'亞洲',cls:'asia',color:'#0f9d77',members:['皓皓','Kevin']},
 ];
-
-/* ===== 工具 ===== */
-function cycle(d){d=d||new Date();const day=d.getDay();const diff=(day-3+7)%7;
-  const s=new Date(d);s.setDate(d.getDate()-diff);s.setHours(0,0,0,0);
-  const e=new Date(s);e.setDate(s.getDate()+6);return{s,e};}
-const f=d=>`${d.getMonth()+1}/${d.getDate()}`;
-const STKEY='workTracker.v1';
-let store=JSON.parse(localStorage.getItem(STKEY)||'{}'); // id -> {p, h, u}
-let filter='all';
-
-function id(r,i){return i+'_'+r[1]+'_'+r[3];}
-function save(){localStorage.setItem(STKEY,JSON.stringify(store));}
-function statusOf(p){return p>=100?2:p>0?1:0;}
 const STXT=['未開始','進行中','已完成'];
+const statusOf=p=>p>=100?2:p>0?1:0;
+const clamp=v=>Math.max(0,Math.min(100,parseInt(v)||0));
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-function render(){
-  const c=cycle();
-  document.getElementById('cycle').textContent=`本週工作週期 ${c.s.getFullYear()}/${f(c.s)}(三) ~ ${f(c.e)}(二)`;
-  // chips
-  let chips='<span class="chip '+(filter==='all'?'active':'')+'" onclick="setF(\'all\')">全部</span>';
-  Object.keys(TEAMS).forEach(t=>{TEAMS[t].members.forEach(m=>{
-    chips+=`<span class="chip ${filter===m?'active':''}" onclick="setF('${m}')">${m}</span>`;});});
-  document.getElementById('chips').innerHTML=chips;
+let DATA={week:'',items:[]};
+let filter='all';
+let REG={}, PERSON={};
 
-  // group by team -> member
-  const board=document.getElementById('board');board.innerHTML='';
-  let ovSum=0,ovN=0;
-  Object.keys(TEAMS).forEach(team=>{
-    TEAMS[team].members.forEach(member=>{
-      const rows=SEED.map((r,i)=>({r,i})).filter(x=>x.r[0]===team && (x.r[1]===member || (x.r[1]===''&&false)));
-      // 未認領（亞洲空白）歸到該團隊第一個顯示的虛擬人
-      if(!rows.length) return;
-      if(filter!=='all' && filter!==member) return;
-      renderPerson(board,team,member,rows,v=>{ovSum+=v.sum;ovN+=v.n;});
-    });
-    // 未認領項目
-    const un=SEED.map((r,i)=>({r,i})).filter(x=>x.r[0]===team && x.r[1]==='');
-    if(un.length && (filter==='all')) renderPerson(board,team,'(未認領)',un,v=>{ovSum+=v.sum;ovN+=v.n;});
-  });
-  const ov=ovN?Math.round(ovSum/ovN):0;
-  document.getElementById('ovpct').textContent=ov+'%';
-  document.getElementById('ovbar').style.width=ov+'%';
+function setSync(m){const s=document.getElementById('sync');if(s)s.textContent=m;}
+
+async function loadState(manual){
+  try{
+    const r=await fetch(API+'/api/state',{cache:'no-store'});
+    const nd=await r.json();
+    const structural = manual || nd.week!==DATA.week || nd.items.length!==DATA.items.length || !Object.keys(REG).length;
+    DATA=nd;
+    if(structural) render(); else applyInPlace();
+    const t=new Date();
+    setSync('已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0'));
+  }catch(e){ setSync('連線失敗，稍後自動重試'); }
 }
 
-function renderPerson(board,team,member,rows,acc){
-  const tcls=TEAMS[team].cls,tcolor=TEAMS[team].color;
-  let sum=0;rows.forEach(({r,i})=>{const st=store[id(r,i)]||{};sum+=(st.p||0);});
-  const avg=Math.round(sum/rows.length);
-  acc({sum:rows.reduce((a,{r,i})=>a+((store[id(r,i)]||{}).p||0),0),n:rows.length});
+function render(){
+  document.getElementById('cycle').textContent='本週工作週期 '+(DATA.week||'');
+  let chips='<span class="chip '+(filter==='all'?'active':'')+'" onclick="setF(\'all\')">全部</span>';
+  TEAM.forEach(t=>t.members.forEach(m=>{ chips+='<span class="chip '+(filter===m?'active':'')+'" onclick="setF(\''+m+'\')">'+m+'</span>'; }));
+  document.getElementById('chips').innerHTML=chips;
 
+  const board=document.getElementById('board');board.innerHTML='';REG={};PERSON={};
+  TEAM.forEach(t=>{
+    t.members.forEach(member=>{
+      if(filter!=='all'&&filter!==member) return;
+      const rows=DATA.items.filter(it=>it.team===t.name&&it.owner===member);
+      if(rows.length) renderPerson(t,member,rows);
+    });
+    const known=t.members;
+    const un=DATA.items.filter(it=>it.team===t.name&&!known.includes(it.owner));
+    if(un.length&&filter==='all') renderPerson(t,'(未認領)',un);
+  });
+  updateOverall();
+}
+
+function avgOf(keys){let s=0;keys.forEach(k=>{const it=DATA.items.find(x=>x.id===k);s+=it?(it.progress||0):0;});return keys.length?Math.round(s/keys.length):0;}
+
+function renderPerson(t,member,rows){
+  const board=document.getElementById('board');
   const el=document.createElement('div');el.className='person';
   const initial=member.replace(/[()]/g,'').slice(0,2);
   el.innerHTML=`
     <div class="phead" onclick="this.parentNode.querySelector('.items').classList.toggle('hide')">
-      <span class="avatar" style="background:${tcolor}">${initial}</span>
-      <span class="pname">${member}</span>
-      <span class="teamtag ${tcls}">${team}</span>
+      <span class="avatar" style="background:${t.color}">${esc(initial)}</span>
+      <span class="pname">${esc(member)}</span>
+      <span class="teamtag ${t.cls}">${esc(t.name)}</span>
       <span class="pmeta">
         <span>${rows.length} 項</span>
-        <span class="pbar"><i style="width:${avg}%;background:${tcolor}"></i></span>
-        <span style="font-weight:600;color:var(--txt)">${avg}%</span>
+        <span class="pbar"><i class="p-bar" style="width:0%;background:${t.color}"></i></span>
+        <span class="p-pct" style="font-weight:600;color:var(--txt)">0%</span>
       </span>
     </div>`;
   const tbl=document.createElement('table');tbl.className='items';
   tbl.innerHTML=`<thead><tr>
     <th>標籤</th><th>工作項目</th><th class="colH">工時</th><th class="colP">完成度</th>
     <th class="colS">狀態</th><th class="colU">最後更新</th></tr></thead><tbody></tbody>`;
-  const tb=tbl.querySelector('tbody');
-  rows.forEach(({r,i})=>{
-    const key=id(r,i);const st=store[key]||{};const p=st.p||0;const h=(st.h!=null?st.h:r[4]);
+  const tb=tbl.querySelector('tbody');const keys=[];
+  rows.forEach(it=>{
+    keys.push(it.id);const p=it.progress||0;const h=(it.hours!=null?it.hours:'');
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td><span class="tag">${r[2]||'-'}</span></td>
-      <td><div class="title">${r[3]}</div>${r[5]?`<div class="note">${r[5]}</div>`:''}</td>
-      <td><input class="hrs" type="number" min="0" step="0.5" value="${h!=null?h:''}" placeholder="-"
-            onchange="setH('${key}',this.value)"></td>
+      <td><span class="tag">${esc(it.tag||'-')}</span></td>
+      <td><div class="title">${esc(it.title)}</div>${it.note?`<div class="note">${esc(it.note)}</div>`:''}</td>
+      <td><input class="hrs" type="number" min="0" step="0.5" value="${h}" placeholder="-"></td>
       <td><div class="prog">
-            <input class="rng" type="range" min="0" max="100" step="5" value="${p}" oninput="dragP('${key}',this.value,this)" onchange="setP('${key}',this.value)">
-            <input class="num" type="number" min="0" max="100" value="${p}" onchange="setP('${key}',this.value)">
+            <input class="rng" type="range" min="0" max="100" step="5" value="${p}">
+            <input class="num" type="number" min="0" max="100" value="${p}">
           </div></td>
       <td><span class="status s${statusOf(p)}">${STXT[statusOf(p)]}</span></td>
-      <td><span class="upd">${st.u||'—'}</span></td>`;
+      <td><span class="upd">${esc(it.updated||'—')}</span></td>`;
+    const rng=tr.querySelector('.rng'),num=tr.querySelector('.num'),hrs=tr.querySelector('.hrs'),stEl=tr.querySelector('.status'),updEl=tr.querySelector('.upd');
+    REG[it.id]={member,rng,num,hrs,stEl,updEl};
+    rng.addEventListener('input',()=>{const v=clamp(rng.value);num.value=v;liveStatus(it.id,v);});
+    rng.addEventListener('change',()=>commit(it.id,{progress:clamp(rng.value)}));
+    num.addEventListener('change',()=>{const v=clamp(num.value);rng.value=v;commit(it.id,{progress:v});});
+    hrs.addEventListener('change',()=>commit(it.id,{hours:hrs.value}));
     tb.appendChild(tr);
   });
+  PERSON[member]={bar:el.querySelector('.p-bar'),pct:el.querySelector('.p-pct'),keys};
   el.appendChild(tbl);board.appendChild(el);
+  updatePerson(member);
 }
 
-function nowStr(){const d=new Date();return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
-function dragP(key,v,el){v=Math.max(0,Math.min(100,parseInt(v)||0));
-  const num=el.parentNode.querySelector('.num');if(num)num.value=v;
-  store[key]=store[key]||{};store[key].p=v;store[key].u=nowStr();save();}
-function setP(key,v){v=Math.max(0,Math.min(100,parseInt(v)||0));
-  store[key]=store[key]||{};store[key].p=v;store[key].u=nowStr();save();render();}
-function setH(key,v){store[key]=store[key]||{};store[key].h=v===''?null:parseFloat(v);save();}
+function liveStatus(id,v){const R=REG[id];if(!R)return;const s=statusOf(v);R.stEl.className='status s'+s;R.stEl.textContent=STXT[s];
+  const it=DATA.items.find(x=>x.id===id);if(it)it.progress=v;updatePerson(R.member);updateOverall();}
+
+async function commit(id,patch){
+  const it=DATA.items.find(x=>x.id===id);if(!it)return;
+  if(patch.progress!=null)it.progress=patch.progress;
+  if(patch.hours!==undefined)it.hours=patch.hours===''?null:parseFloat(patch.hours);
+  const R=REG[id];if(R){const s=statusOf(it.progress||0);R.stEl.className='status s'+s;R.stEl.textContent=STXT[s];}
+  updatePerson(R?R.member:null);updateOverall();
+  try{
+    const r=await fetch(API+'/api/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({id},patch))});
+    const res=await r.json();
+    if(res&&res.item&&R)R.updEl.textContent=res.item.updated||'—';
+    setSync('已儲存');
+  }catch(e){ setSync('儲存失敗，請重試'); }
+}
+
+function applyInPlace(){
+  DATA.items.forEach(it=>{
+    const R=REG[it.id];if(!R)return;
+    const editing=document.activeElement&&(document.activeElement===R.rng||document.activeElement===R.num||document.activeElement===R.hrs);
+    if(editing)return;
+    const p=it.progress||0;
+    if(+R.rng.value!==p)R.rng.value=p;
+    if(+R.num.value!==p)R.num.value=p;
+    const s=statusOf(p);R.stEl.className='status s'+s;R.stEl.textContent=STXT[s];
+    R.updEl.textContent=it.updated||'—';
+    R.hrs.value=(it.hours!=null?it.hours:'');
+  });
+  Object.keys(PERSON).forEach(updatePerson);updateOverall();
+}
+
+function updatePerson(member){const P=PERSON[member];if(!P)return;const a=avgOf(P.keys);P.bar.style.width=a+'%';P.pct.textContent=a+'%';}
+function updateOverall(){const a=DATA.items.length?Math.round(DATA.items.reduce((s,it)=>s+(it.progress||0),0)/DATA.items.length):0;
+  document.getElementById('ovpct').textContent=a+'%';document.getElementById('ovbar').style.width=a+'%';}
+
 function setF(m){filter=m;render();}
 function expand(open){document.querySelectorAll('.items').forEach(e=>e.classList.toggle('hide',!open));}
-function exportJSON(){const blob=new Blob([JSON.stringify(store,null,2)],{type:'application/json'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download='work-progress-'+new Date().toISOString().slice(0,10)+'.json';a.click();}
-function importJSON(inp){const file=inp.files[0];if(!file)return;const rd=new FileReader();
-  rd.onload=e=>{try{store=JSON.parse(e.target.result);save();render();alert('匯入完成');}catch(x){alert('檔案格式錯誤');}};
-  rd.readAsText(file);}
-const style=document.createElement('style');style.textContent='.items.hide{display:none}';document.head.appendChild(style);
-render();
+
+async function openHistory(){
+  const box=document.getElementById('history');box.style.display='block';box.innerHTML='載入歷史中…';
+  try{
+    const j=await (await fetch(API+'/api/history')).json();
+    if(!j.weeks||!j.weeks.length){box.innerHTML='<div class="hint">目前還沒有歷史週次。每週三 00:00 換頁後，上一週會封存到這裡。</div>';return;}
+    const opts=j.weeks.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+    box.innerHTML=`<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <span style="font-weight:500">歷史週報：</span>
+      <select id="histSel" onchange="showHistory(this.value)">${opts}</select>
+      <button onclick="document.getElementById('history').style.display='none'">關閉</button></div>
+      <div id="histBody"></div>`;
+    showHistory(j.weeks[0]);
+  }catch(e){box.innerHTML='<div class="hint">讀取歷史失敗。</div>';}
+}
+async function showHistory(week){
+  const body=document.getElementById('histBody');body.textContent='載入中…';
+  try{
+    const snap=await (await fetch(API+'/api/history/'+encodeURIComponent(week))).json();
+    const rows=snap.items.map(it=>`<tr>
+      <td style="padding:8px 12px"><span class="tag">${esc(it.tag||'-')}</span></td>
+      <td style="padding:8px 12px">${esc(it.title)} <span style="color:var(--muted);font-size:12px">· ${esc(it.owner)}</span></td>
+      <td style="padding:8px 12px;text-align:center">${it.hours!=null?it.hours+'h':'-'}</td>
+      <td style="padding:8px 12px">${it.progress||0}%</td></tr>`).join('');
+    body.innerHTML=`<div style="border:0.5px solid var(--line);border-radius:8px;overflow:hidden">
+      <table style="width:100%"><thead><tr>
+      <th style="padding:8px 12px">標籤</th><th style="padding:8px 12px">工作項目</th>
+      <th style="padding:8px 12px">工時</th><th style="padding:8px 12px">完成度</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }catch(e){body.textContent='讀取失敗';}
+}
+
+loadState();
+setInterval(()=>loadState(false),20000);
 </script>
 </body>
 </html>

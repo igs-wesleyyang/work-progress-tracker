@@ -1,0 +1,12 @@
+name = "work-progress-api"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# KV namespace（部署時用 wrangler 建立後，把 id 填到這裡）
+kv_namespaces = [
+  { binding = "KV", id = "cad8d375df01471daa4768c7ddd0229e" }
+]
+
+# 每週三 00:00（台灣）自動換頁 = 週二 16:00 UTC
+[triggers]
+crons = ["0 16 * * 2"]
