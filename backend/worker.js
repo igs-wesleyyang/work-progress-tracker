@@ -139,6 +139,45 @@ async function rollover(env) {
   return { rolled: true, week: newWk, archived: cur.week };
 }
 
+// ===== Telegram 提醒 =====
+const WKD = ['日','一','二','三','四','五','六'];
+function reminderMsg(cur) {
+  const t = nowTW();
+  const todayMD = fmtMD(t);
+  const items = cur.items || [];
+  const overall = items.length ? Math.round(items.reduce((s,it)=>s+(it.progress||0),0)/items.length) : 0;
+  const lines = [
+    `📋 工作進度提醒 (${t.getUTCMonth()+1}/${t.getUTCDate()} 週${WKD[t.getUTCDay()]})`,
+    `本週 ${cur.week}　全組平均 ${overall}%`,
+  ];
+  for (const team of Object.keys(TEAMS)) {
+    lines.push(`──── ${team} ────`);
+    for (const m of TEAMS[team]) {
+      const mine = items.filter(it => it.owner === m);
+      if (!mine.length) continue;
+      const avg = Math.round(mine.reduce((s,it)=>s+(it.progress||0),0)/mine.length);
+      const dot = avg >= 100 ? '✅' : avg > 0 ? '🔵' : '🔴';
+      const updatedToday = mine.some(it => it.updated && it.updated.startsWith(todayMD + ' '));
+      lines.push(`${dot} ${m}　${avg}%${updatedToday ? '' : '　⚠️今日未更新'}`);
+    }
+  }
+  lines.push('👉 https://igs-wesleyyang.github.io/work-progress-tracker/');
+  return lines.join('\n');
+}
+async function tgSend(env, text) {
+  if (!env.TG_BOT_TOKEN || !env.TG_CHAT_ID) return { ok: false, reason: '尚未設定 TG_BOT_TOKEN / TG_CHAT_ID' };
+  const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: env.TG_CHAT_ID, text, disable_web_page_preview: true }),
+  });
+  return await r.json();
+}
+async function sendReminder(env) {
+  await rollover(env);              // 順手檢查是否該換週
+  const cur = await getCurrent(env);
+  return await tgSend(env, reminderMsg(cur));
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -192,6 +231,11 @@ export default {
         return json(r);
       }
 
+      if (path === '/api/send-reminder' && request.method === 'POST') {
+        const r = await sendReminder(env);
+        return json(r);
+      }
+
       return json({ error: 'not found' }, 404);
     } catch (e) {
       return json({ error: String(e) }, 500);
@@ -199,6 +243,6 @@ export default {
   },
 
   async scheduled(event, env) {
-    await rollover(env);
+    await sendReminder(env);       // 每個提醒時段觸發（內含換週檢查）
   },
 };
