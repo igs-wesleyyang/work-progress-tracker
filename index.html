@@ -75,7 +75,7 @@
 </header>
 
 <div class="wrap">
-  <div class="hint">進度即時共用：任何人更新，其他人重新整理（或每 20 秒自動同步）就看得到。每週三 00:00（台灣）自動換頁，上週資料存入「歷史週報」。</div>
+  <div class="hint">進度即時共用：任何人更新，其他人重新整理（或每 20 秒自動同步）就看得到。每週三 00:00 自動換頁、上週存入「歷史週報」。項目每天 21:00 自動從來源表更新，也可按右側按鈕手動重讀（皆保留已填進度）。</div>
   <div class="legend" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-size:13px;color:var(--txt);flex-wrap:wrap">
     <span style="font-weight:500">團隊顏色：</span>
     <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:3px;background:#2563eb;display:inline-block"></span>美國團隊</span>
@@ -89,6 +89,8 @@
     <button onclick="expand(false)">全部收合</button>
     <button onclick="loadState(true)">重新整理</button>
     <button onclick="openHistory()">歷史週報</button>
+    <button onclick="syncNow('us','美國企場')" title="從美國企場 Google Sheet 重新讀取項目">重讀美國企場</button>
+    <button onclick="syncNow('asia','亞洲企劃')" title="從亞洲企劃 Google Sheet 重新讀取項目">重讀亞洲企劃</button>
   </div>
   <div id="board"></div>
   <div id="history" style="display:none;margin-top:16px"></div>
@@ -230,6 +232,17 @@ function updateOverall(){const a=DATA.items.length?Math.round(DATA.items.reduce(
 
 function setF(m){filter=m;render();}
 function expand(open){document.querySelectorAll('.items').forEach(e=>e.classList.toggle('hide',!open));}
+
+async function syncNow(src,label){
+  if(!confirm('要從「'+label+'」Google Sheet 重新讀取項目嗎？\n會更新項目清單，已填的完成度會保留。'))return;
+  setSync('讀取 '+label+' 中…');
+  try{
+    const r=await fetch(API+'/api/sync?src='+src,{method:'POST'});
+    const j=await r.json();
+    if(j.ok){ setSync(label+' 已更新（'+(j.count||0)+' 項）'); await loadState(true); }
+    else setSync('讀取失敗：'+(j.error||''));
+  }catch(e){ setSync('讀取失敗，請重試'); }
+}
 
 async function openHistory(){
   const box=document.getElementById('history');box.style.display='block';box.innerHTML='載入歷史中…';

@@ -18,6 +18,12 @@ const TEAMS = {
   '亞洲': ['皓皓', 'Kevin'],
 };
 
+const SOURCE_IDS = {
+  美國企場: '1KzQ7RU2qQw8Lc_ZYVyGxE55zBkL2u-_laxQfLXvSPTQ',
+  亞洲市場企劃: '1Q1RQwv8pzL4mhwtKnYFzfGH0UpfdOxJEYoRyyo-rS6w',
+  美國辦公室_Arthur: '1XBHQSeVshYaNkENI8yOiSp9aQJJwqKsflp9pv5QzaOI',
+};
+
 // 初始項目（與前端一致；換週時項目保留、進度歸零）
 // [團隊, 負責人, 標籤, 工作項目, 預計工時, 備註]
 const SEED = [
@@ -196,6 +202,134 @@ async function isHolidayTW(env) {
   return d ? !!d.isHoliday : false;
 }
 
+// ===== Google 服務帳號驗證 + 讀表 =====
+function b64url(input) {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
+  let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function pemToDer(pem) {
+  const b64 = pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+  const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+let _gtoken = null, _gexp = 0;
+async function gToken(env) {
+  if (_gtoken && Date.now() < _gexp - 60000) return _gtoken;
+  if (!env.GS_CLIENT_EMAIL || !env.GS_PRIVATE_KEY) throw new Error('尚未設定 GS_CLIENT_EMAIL / GS_PRIVATE_KEY');
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claim = {
+    iss: env.GS_CLIENT_EMAIL,
+    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600, iat: now,
+  };
+  const unsigned = b64url(JSON.stringify(header)) + '.' + b64url(JSON.stringify(claim));
+  const key = await crypto.subtle.importKey('pkcs8', pemToDer(env.GS_PRIVATE_KEY.replace(/\\n/g, '\n')),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned));
+  const jwt = unsigned + '.' + b64url(sig);
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + jwt,
+  });
+  const j = await r.json();
+  if (!j.access_token) throw new Error('token error: ' + JSON.stringify(j).slice(0, 200));
+  _gtoken = j.access_token; _gexp = Date.now() + (j.expires_in || 3600) * 1000;
+  return _gtoken;
+}
+async function sheetValues(env, sheetId, range) {
+  const tok = await gToken(env);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
+  const j = await r.json();
+  if (j.error) throw new Error('sheets api: ' + JSON.stringify(j.error).slice(0, 200));
+  return j.values || [];
+}
+
+// ===== 從來源表解析「最近一週」各人項目 =====
+function asiaTag(title) {
+  if (/^【主】/.test(title)) return '主活動';
+  if (/例行|週二|週三|剩餘/.test(title)) return '例行';
+  if (/H5/.test(title)) return 'H5';
+  if (/會議/.test(title)) return '會議';
+  return '企劃';
+}
+// 美國企場：人名在 A 欄當區塊標題，項目列 B=標籤 C=工作項目 D=備註；取每人「最後一次出現」的區塊
+async function parseUS(env) {
+  const rows = await sheetValues(env, SOURCE_IDS.美國企場, '美國企場每週工作!A1:D');
+  const BOUND = new Set(['10', '聿緯', '張譯', '貞貞', 'Abbie', '亞瑟']);
+  const OUT = { '聿緯': '聿緯', '張譯': '張譯', '貞貞': '貞貞', 'Abbie': 'Abbie', '亞瑟': 'Arthur' };
+  const lastIdx = {};
+  rows.forEach((r, i) => { const a = ((r[0] || '') + '').trim(); if (BOUND.has(a)) lastIdx[a] = i; });
+  const items = [];
+  for (const name of Object.keys(OUT)) {
+    const s = lastIdx[name]; if (s == null) continue;
+    let empties = 0;
+    for (let i = s + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const a = ((r[0] || '') + '').trim();
+      if (BOUND.has(a)) break;
+      if (/\d{1,4}[-/]\d{1,2}[-/]?\d{0,2}\s*~/.test(a)) break;   // 週區間標題
+      const tag = ((r[1] || '') + '').trim(), title = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
+      if (!tag && !title && !note) { if (++empties >= 4) break; continue; }
+      empties = 0;
+      if (!title) continue;
+      items.push({ team: '美國', owner: OUT[name], tag, title, hours: null, note });
+    }
+  }
+  return items;
+}
+// 亞洲企劃：人名在 B 欄當標題，項目列 B=工作項目 C=工時 D=工作內容
+async function parseAsia(env) {
+  const rows = await sheetValues(env, SOURCE_IDS.亞洲市場企劃, '企劃工作總攬!A1:D');
+  const BOUND = new Set(['皓皓', 'Kevin']);
+  const lastIdx = {};
+  rows.forEach((r, i) => { const b = ((r[1] || '') + '').trim(); if (BOUND.has(b)) lastIdx[b] = i; });
+  const items = [];
+  for (const name of ['皓皓', 'Kevin']) {
+    const s = lastIdx[name]; if (s == null) continue;
+    let empties = 0;
+    for (let i = s + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const b = ((r[1] || '') + '').trim();
+      if (BOUND.has(b)) break;
+      const title = b, hraw = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
+      if (!title && !hraw && !note) { if (++empties >= 4) break; continue; }
+      empties = 0;
+      if (!title) continue;
+      const h = parseFloat(hraw);
+      items.push({ team: '亞洲', owner: name, tag: asiaTag(title), title, hours: isNaN(h) ? null : h, note });
+    }
+  }
+  return items;
+}
+function stableId(owner, title) { return (owner + '_' + title).replace(/\s+/g, '').slice(0, 90); }
+// 把某團隊的項目用解析結果覆蓋，並以 (負責人+項目) 比對保留既有進度/工時
+async function syncSource(env, which) {
+  const parsed = which === 'us' ? await parseUS(env) : await parseAsia(env);
+  const teamName = which === 'us' ? '美國' : '亞洲';
+  const cur = await getCurrent(env);
+  const old = cur.items;
+  const merged = parsed.map(p => {
+    const o = old.find(x => x.owner === p.owner && x.title === p.title);
+    return {
+      id: stableId(p.owner, p.title),
+      team: p.team, owner: p.owner, tag: p.tag || '', title: p.title,
+      plannedHours: p.hours != null ? p.hours : (o ? o.plannedHours : null),
+      note: p.note || '',
+      progress: o ? (o.progress || 0) : 0,
+      hours: (o && o.hours != null) ? o.hours : p.hours,
+      updated: o ? (o.updated || '') : '',
+    };
+  });
+  cur.items = old.filter(it => it.team !== teamName).concat(merged);
+  await env.KV.put('current', JSON.stringify(cur));
+  return { synced: which, count: merged.length, owners: [...new Set(merged.map(m => m.owner))] };
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -254,6 +388,17 @@ export default {
         return json(r);
       }
 
+      if (path === '/api/sync' && request.method === 'POST') {
+        const which = url.searchParams.get('src') || 'all';
+        if (which === 'all') {
+          const us = await syncSource(env, 'us');
+          const asia = await syncSource(env, 'asia');
+          return json({ ok: true, us, asia });
+        }
+        const r = await syncSource(env, which);
+        return json({ ok: true, ...r });
+      }
+
       if (path === '/api/holiday' && request.method === 'GET') {
         const t = nowTW();
         return json({ date: `${t.getUTCFullYear()}/${pad(t.getUTCMonth()+1)}/${pad(t.getUTCDate())}`, isHoliday: await isHolidayTW(env) });
@@ -270,6 +415,11 @@ export default {
     const t = nowTW();
     const dow = t.getUTCDay();        // 0=日 1=一 … 6=六（台灣當地）
     const hh = t.getUTCHours();       // 台灣當地小時
+    if (hh === 21) {                       // 每天 21:00 台灣：自動重讀來源表
+      await syncSource(env, 'us');
+      await syncSource(env, 'asia');
+      return;
+    }
     const isReminder =
       (hh === 20 && (dow === 1 || dow === 2)) ||           // 週一、二 20:00
       (hh === 17 && (dow === 3 || dow === 4 || dow === 5)); // 週三、四、五 17:30
