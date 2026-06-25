@@ -178,6 +178,24 @@ async function sendReminder(env) {
   return await tgSend(env, reminderMsg(cur));
 }
 
+// 查台灣官方行事曆（含補班/補假），判斷某天是否為假日
+async function isHolidayTW(env) {
+  const t = nowTW();
+  const y = t.getUTCFullYear();
+  const key = 'cal:' + y;
+  let cal = await env.KV.get(key, 'json');
+  if (!cal) {
+    try {
+      const r = await fetch('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/' + y + '.json');
+      if (r.ok) { cal = await r.json(); await env.KV.put(key, JSON.stringify(cal), { expirationTtl: 2592000 }); }
+    } catch (e) {}
+  }
+  if (!Array.isArray(cal)) return false;   // 取不到資料就保守照常發
+  const ymd = '' + y + pad(t.getUTCMonth() + 1) + pad(t.getUTCDate());
+  const d = cal.find(x => x.date === ymd);
+  return d ? !!d.isHoliday : false;
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -236,6 +254,11 @@ export default {
         return json(r);
       }
 
+      if (path === '/api/holiday' && request.method === 'GET') {
+        const t = nowTW();
+        return json({ date: `${t.getUTCFullYear()}/${pad(t.getUTCMonth()+1)}/${pad(t.getUTCDate())}`, isHoliday: await isHolidayTW(env) });
+      }
+
       return json({ error: 'not found' }, 404);
     } catch (e) {
       return json({ error: String(e) }, 500);
@@ -250,7 +273,11 @@ export default {
     const isReminder =
       (hh === 20 && (dow === 1 || dow === 2)) ||           // 週一、二 20:00
       (hh === 17 && (dow === 3 || dow === 4 || dow === 5)); // 週三、四、五 17:30
-    if (isReminder) await sendReminder(env);
-    else await rollover(env);         // 其他觸發點順手檢查換週
+    if (isReminder) {
+      if (await isHolidayTW(env)) { await rollover(env); return; }  // 台灣例假日略過提醒
+      await sendReminder(env);
+    } else {
+      await rollover(env);            // 其他觸發點順手檢查換週
+    }
   },
 };
