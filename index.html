@@ -75,6 +75,11 @@
 
 <div class="wrap">
   <div class="hint">提示：進度與工時填寫後會自動存到「這台瀏覽器」。要與他人同步、或啟用 Telegram 提醒，需後端版本（第二階段）。可用右側「匯出 JSON」備份/交接。</div>
+  <div class="legend" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-size:13px;color:var(--txt);flex-wrap:wrap">
+    <span style="font-weight:500">團隊顏色：</span>
+    <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:3px;background:#2563eb;display:inline-block"></span>美國團隊</span>
+    <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:3px;background:#0f9d77;display:inline-block"></span>亞洲團隊</span>
+  </div>
   <div class="toolbar">
     <span id="chips"></span>
     <span style="flex:1"></span>
@@ -246,8 +251,8 @@ function renderPerson(board,team,member,rows,acc){
       <td><input class="hrs" type="number" min="0" step="0.5" value="${h!=null?h:''}" placeholder="-"
             onchange="setH('${key}',this.value)"></td>
       <td><div class="prog">
-            <input type="range" min="0" max="100" step="5" value="${p}" oninput="setP('${key}',this.value,this)">
-            <input type="number" min="0" max="100" value="${p}" onchange="setP('${key}',this.value,this)">
+            <input class="rng" type="range" min="0" max="100" step="5" value="${p}" oninput="dragP('${key}',this.value,this)" onchange="setP('${key}',this.value)">
+            <input class="num" type="number" min="0" max="100" value="${p}" onchange="setP('${key}',this.value)">
           </div></td>
       <td><span class="status s${statusOf(p)}">${STXT[statusOf(p)]}</span></td>
       <td><span class="upd">${st.u||'—'}</span></td>`;
@@ -257,7 +262,10 @@ function renderPerson(board,team,member,rows,acc){
 }
 
 function nowStr(){const d=new Date();return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
-function setP(key,v,node){v=Math.max(0,Math.min(100,parseInt(v)||0));
+function dragP(key,v,el){v=Math.max(0,Math.min(100,parseInt(v)||0));
+  const num=el.parentNode.querySelector('.num');if(num)num.value=v;
+  store[key]=store[key]||{};store[key].p=v;store[key].u=nowStr();save();}
+function setP(key,v){v=Math.max(0,Math.min(100,parseInt(v)||0));
   store[key]=store[key]||{};store[key].p=v;store[key].u=nowStr();save();render();}
 function setH(key,v){store[key]=store[key]||{};store[key].h=v===''?null:parseFloat(v);save();}
 function setF(m){filter=m;render();}
