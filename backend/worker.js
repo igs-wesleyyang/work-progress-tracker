@@ -243,6 +243,14 @@ export default {
   },
 
   async scheduled(event, env) {
-    await sendReminder(env);       // 每個提醒時段觸發（內含換週檢查）
+    // 以台灣時間判斷星期與時段（不依賴 cron 的星期語意）
+    const t = nowTW();
+    const dow = t.getUTCDay();        // 0=日 1=一 … 6=六（台灣當地）
+    const hh = t.getUTCHours();       // 台灣當地小時
+    const isReminder =
+      (hh === 20 && (dow === 1 || dow === 2)) ||           // 週一、二 20:00
+      (hh === 17 && (dow === 3 || dow === 4 || dow === 5)); // 週三、四、五 17:30
+    if (isReminder) await sendReminder(env);
+    else await rollover(env);         // 其他觸發點順手檢查換週
   },
 };
