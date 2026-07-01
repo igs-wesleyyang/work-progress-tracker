@@ -460,21 +460,29 @@ export default {
     const t = nowTW();
     const dow = t.getUTCDay();        // 0=日 1=一 … 6=六（台灣當地）
     const hh = t.getUTCHours();       // 台灣當地小時
-    if (hh === 21) {                       // 每天 21:00 台灣：自動重讀來源表 + 記錄當日完成度
+    const mm = t.getUTCMinutes();
+    if (hh === 21) {                       // 21:00：自動重讀來源表 + 記錄當日完成度
       await syncSource(env, 'us');
       await syncSource(env, 'asia');
       await recordDaily(env);
       return;
     }
+    // 提醒：週一二 20:00、週三四五 17:30
     const isReminder =
-      (hh === 20 && (dow === 1 || dow === 2)) ||           // 週一、二 20:00
-      (hh === 17 && (dow === 3 || dow === 4 || dow === 5)); // 週三、四、五 17:30
+      (hh === 20 && mm < 30 && (dow === 1 || dow === 2)) ||
+      (hh === 17 && (dow === 3 || dow === 4 || dow === 5));
+    // 未更新檢查（提醒後 30 分）：週一二 20:30、週三四五 18:00
+    const isMissCheck =
+      (hh === 20 && mm >= 30 && (dow === 1 || dow === 2)) ||
+      (hh === 18 && (dow === 3 || dow === 4 || dow === 5));
     if (isReminder) {
-      if (await isHolidayTW(env)) { await rollover(env); return; }  // 台灣例假日：不提醒、不計未更新
-      await recordMisses(env);        // 記錄本次「尚未更新」的人
+      if (await isHolidayTW(env)) { await rollover(env); return; }  // 例假日不提醒
       await sendReminder(env);
+    } else if (isMissCheck) {
+      if (await isHolidayTW(env)) return;   // 例假日不計未更新
+      await recordMisses(env);              // 提醒後仍未更新才 +1
     } else {
-      await rollover(env);            // 其他觸發點順手檢查換週
+      await rollover(env);
     }
   },
 };

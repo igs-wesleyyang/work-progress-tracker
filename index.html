@@ -293,7 +293,7 @@ function renderStats(s){
   const live=DATA.items.length?Math.round(DATA.items.reduce((a,it)=>a+(it.progress||0),0)/DATA.items.length):0;
   if(!daily.length||daily[daily.length-1].date!==today) daily.push({date:today,overall:live});
   else daily[daily.length-1].overall=live;
-  box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後仍未更新）',missChart(s));
+  box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後30分仍未更新）',missChart(s));
 }
 function lineChart(data){
   const W=460,H=150,pad=26;
