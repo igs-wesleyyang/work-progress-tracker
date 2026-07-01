@@ -301,22 +301,25 @@ async function parseUS(env) {
   const rows = await sheetValues(env, SOURCE_IDS.美國企場, '美國企場每週工作!A1:D');
   const BOUND = new Set(['10', '聿緯', '張譯', '貞貞', 'Abbie', '亞瑟']);
   const OUT = { '聿緯': '聿緯', '張譯': '張譯', '貞貞': '貞貞', 'Abbie': 'Abbie', '亞瑟': 'Arthur' };
+  // 人名標題列＝A欄是成員名 且 C欄(工作項目)為空；項目列的 A 欄則是工時數字或空白
+  const isHeader = (r) => { const a = ((r[0] || '') + '').trim(); const c = ((r[2] || '') + '').trim(); return BOUND.has(a) && !c; };
   const lastIdx = {};
-  rows.forEach((r, i) => { const a = ((r[0] || '') + '').trim(); if (BOUND.has(a)) lastIdx[a] = i; });
+  rows.forEach((r, i) => { if (isHeader(r)) lastIdx[((r[0] || '') + '').trim()] = i; });
   const items = [];
   for (const name of Object.keys(OUT)) {
     const s = lastIdx[name]; if (s == null) continue;
     let empties = 0;
     for (let i = s + 1; i < rows.length; i++) {
       const r = rows[i] || [];
+      if (isHeader(r)) break;
       const a = ((r[0] || '') + '').trim();
-      if (BOUND.has(a)) break;
       if (/\d{1,4}[-/]\d{1,2}[-/]?\d{0,2}\s*~/.test(a)) break;   // 週區間標題
       const tag = ((r[1] || '') + '').trim(), title = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
-      if (!tag && !title && !note) { if (++empties >= 4) break; continue; }
+      if (!a && !tag && !title && !note) { if (++empties >= 4) break; continue; }
       empties = 0;
       if (!title) continue;
-      items.push({ team: '美國', owner: OUT[name], tag, title, hours: null, note });
+      const h = parseFloat(a);          // A 欄＝工時
+      items.push({ team: '美國', owner: OUT[name], tag, title, hours: isNaN(h) ? null : h, note });
     }
   }
   return items;
@@ -360,7 +363,7 @@ async function syncSource(env, which) {
       plannedHours: p.hours != null ? p.hours : (o ? o.plannedHours : null),
       note: p.note || '',
       progress: o ? (o.progress || 0) : 0,
-      hours: (o && o.hours != null) ? o.hours : p.hours,
+      hours: p.hours != null ? p.hours : (o ? o.hours : null),   // 來源表工時優先
       updated: o ? (o.updated || '') : '',
     };
   });
