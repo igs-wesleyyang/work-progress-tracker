@@ -138,8 +138,8 @@ async function rollover(env) {
   await env.KV.put(`history:${cur.week}`, JSON.stringify(cur));
   const idx = (await env.KV.get('history:index', 'json')) || [];
   if (!idx.includes(cur.week)) { idx.unshift(cur.week); await env.KV.put('history:index', JSON.stringify(idx)); }
-  // 開新一週：項目保留、進度歸零
-  const items = cur.items.map(it => ({ ...it, progress: 0, updated: '' }));
+  // 開新一週：項目保留、進度歸零、工時重置回來源預計工時（無則清空）
+  const items = cur.items.map(it => ({ ...it, progress: 0, updated: '', hours: it.plannedHours != null ? it.plannedHours : null }));
   const next = { week: newWk, items };
   await env.KV.put('current', JSON.stringify(next));
   return { rolled: true, week: newWk, archived: cur.week };
