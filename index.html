@@ -75,6 +75,7 @@
 </header>
 
 <div class="wrap">
+  <div id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:16px"></div>
   <div class="hint">進度即時共用：任何人更新，其他人重新整理（或每 20 秒自動同步）就看得到。每週三 00:00 自動換頁、上週存入「歷史週報」。項目每天 21:00 自動從來源表更新，也可按右側按鈕手動重讀（皆保留已填進度）。</div>
   <div class="legend" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-size:13px;color:var(--txt);flex-wrap:wrap">
     <span style="font-weight:500">團隊顏色：</span>
@@ -87,7 +88,7 @@
     <span style="flex:1"></span>
     <button onclick="expand(true)">全部展開</button>
     <button onclick="expand(false)">全部收合</button>
-    <button onclick="loadState(true)">重新整理</button>
+    <button onclick="refreshAll()">重新整理</button>
     <button onclick="openHistory()">歷史週報</button>
     <button onclick="syncNow('us','美國企場')" title="從美國企場 Google Sheet 重新讀取項目">重讀美國企場</button>
     <button onclick="syncNow('asia','亞洲企劃')" title="從亞洲企劃 Google Sheet 重新讀取項目">重讀亞洲企劃</button>
@@ -239,7 +240,7 @@ async function syncNow(src,label){
   try{
     const r=await fetch(API+'/api/sync?src='+src,{method:'POST'});
     const j=await r.json();
-    if(j.ok){ setSync(label+' 已更新（'+(j.count||0)+' 項）'); await loadState(true); }
+    if(j.ok){ setSync(label+' 已更新（'+(j.count||0)+' 項）'); await loadState(true); loadStats(); }
     else setSync('讀取失敗：'+(j.error||''));
   }catch(e){ setSync('讀取失敗，請重試'); }
 }
@@ -275,7 +276,59 @@ async function showHistory(week){
   }catch(e){body.textContent='讀取失敗';}
 }
 
-loadState();
+/* ===== 統計圖表 ===== */
+async function loadStats(){
+  try{ const s=await (await fetch(API+'/api/stats',{cache:'no-store'})).json(); renderStats(s); }catch(e){}
+}
+function refreshAll(){ loadState(true); loadStats(); }
+function statCard(title,inner){
+  return '<div style="background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px">'+
+    '<div style="font-size:13px;font-weight:600;margin-bottom:8px">'+title+'</div>'+inner+'</div>';
+}
+function renderStats(s){
+  const box=document.getElementById('stats'); if(!box) return;
+  const daily=(s.daily||[]).slice();
+  const now=new Date();
+  const today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  const live=DATA.items.length?Math.round(DATA.items.reduce((a,it)=>a+(it.progress||0),0)/DATA.items.length):0;
+  if(!daily.length||daily[daily.length-1].date!==today) daily.push({date:today,overall:live});
+  else daily[daily.length-1].overall=live;
+  box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後仍未更新）',missChart(s));
+}
+function lineChart(data){
+  const W=460,H=150,pad=26;
+  if(!data.length) return '<div style="color:var(--muted);font-size:12px">尚無資料，今晚 21:00 起累積。</div>';
+  const n=data.length;
+  const xs=i=> pad+(n===1?(W-2*pad)/2:i*(W-2*pad)/(n-1));
+  const ys=v=> (H-22)-(v/100)*(H-32);
+  const pts=data.map((d,i)=>xs(i).toFixed(1)+','+ys(d.overall).toFixed(1));
+  const grid=[0,50,100].map(v=>'<line x1="'+pad+'" y1="'+ys(v)+'" x2="'+(W-6)+'" y2="'+ys(v)+'" stroke="var(--line)"/><text x="2" y="'+(ys(v)+3)+'" font-size="9" fill="var(--muted)">'+v+'</text>').join('');
+  const dots=data.map((d,i)=>'<circle cx="'+xs(i)+'" cy="'+ys(d.overall)+'" r="2.5" fill="var(--us)"/>').join('');
+  const last=data[n-1];
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+grid+
+    '<polygon points="'+pad+','+ys(0)+' '+pts.join(' ')+' '+xs(n-1)+','+ys(0)+'" fill="var(--us)" opacity="0.08"/>'+
+    '<polyline points="'+pts.join(' ')+'" fill="none" stroke="var(--us)" stroke-width="2"/>'+dots+
+    '<text x="'+xs(n-1)+'" y="'+(ys(last.overall)-6)+'" font-size="11" fill="var(--us)" text-anchor="end" font-weight="600">'+last.overall+'%</text>'+
+    '<text x="'+pad+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)">'+data[0].date.slice(5)+'</text>'+
+    '<text x="'+(W-6)+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+last.date.slice(5)+'</text></svg>';
+}
+function missChart(s){
+  const m=(s.misses&&s.misses[s.currentWeek])||{};
+  const people=[]; TEAM.forEach(t=>t.members.forEach(name=>people.push({name,color:t.color})));
+  const vals=people.map(p=>({name:p.name,color:p.color,c:m[p.name]||0}));
+  const max=Math.max(3,...vals.map(v=>v.c));
+  const W=460,H=150,pad=16,bw=(W-2*pad)/vals.length;
+  const bars=vals.map((v,i)=>{
+    const bh=(v.c/max)*(H-44),x=pad+i*bw,y=(H-24)-bh;
+    return '<rect x="'+(x+bw*0.15).toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+(bw*0.7).toFixed(1)+'" height="'+Math.max(0,bh).toFixed(1)+'" rx="3" fill="'+v.color+'"/>'+
+      '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-3).toFixed(1)+'" font-size="10" fill="var(--txt)" text-anchor="middle">'+v.c+'</text>'+
+      '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-8)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+v.name+'</text>';
+  }).join('');
+  const note=Object.keys(m).length?'':'<text x="'+(W/2)+'" y="14" font-size="10" fill="var(--muted)" text-anchor="middle">本週提醒尚未發送，之後開始累計</text>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+note+bars+'</svg>';
+}
+
+(async()=>{ await loadState(); loadStats(); })();
 setInterval(()=>loadState(false),20000);
 </script>
 </body>

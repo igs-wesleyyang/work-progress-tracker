@@ -202,6 +202,45 @@ async function isHolidayTW(env) {
   return d ? !!d.isHoliday : false;
 }
 
+// ===== 統計：每日完成度 + 每週「提醒後未更新」次數 =====
+async function getStats(env) {
+  return (await env.KV.get('stats', 'json')) || { daily: [], misses: {} };
+}
+// 記錄當日整體完成度（每天 21:00 收工後）
+async function recordDaily(env) {
+  const cur = await getCurrent(env);
+  const t = nowTW();
+  const date = `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+  const overall = cur.items.length ? Math.round(cur.items.reduce((s, it) => s + (it.progress || 0), 0) / cur.items.length) : 0;
+  const stats = await getStats(env);
+  const ex = stats.daily.find(d => d.date === date);
+  if (ex) ex.overall = overall; else stats.daily.push({ date, overall });
+  if (stats.daily.length > 120) stats.daily = stats.daily.slice(-120);
+  await env.KV.put('stats', JSON.stringify(stats));
+}
+// 提醒時點：記錄「今天尚未更新」的人（每人每週累計）
+async function recordMisses(env) {
+  const cur = await getCurrent(env);
+  const t = nowTW();
+  const todayMD = fmtMD(t);
+  const stats = await getStats(env);
+  const wk = cur.week;
+  stats.misses[wk] = stats.misses[wk] || {};
+  for (const team of Object.keys(TEAMS)) {
+    for (const m of TEAMS[team]) {
+      const mine = cur.items.filter(it => it.owner === m);
+      if (!mine.length) continue;
+      if (!(m in stats.misses[wk])) stats.misses[wk][m] = 0;
+      const updatedToday = mine.some(it => it.updated && it.updated.startsWith(todayMD + ' '));
+      if (!updatedToday) stats.misses[wk][m] += 1;
+    }
+  }
+  // 只保留最近 12 週
+  const weeks = Object.keys(stats.misses);
+  if (weeks.length > 12) { weeks.slice(0, weeks.length - 12).forEach(w => delete stats.misses[w]); }
+  await env.KV.put('stats', JSON.stringify(stats));
+}
+
 // ===== Google 服務帳號驗證 + 讀表 =====
 function b64url(input) {
   const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
@@ -366,6 +405,12 @@ export default {
         return json({ ok: true, item: it });
       }
 
+      if (path === '/api/stats' && request.method === 'GET') {
+        const cur = await getCurrent(env);
+        const stats = await getStats(env);
+        return json({ daily: stats.daily || [], misses: stats.misses || {}, teams: TEAMS, currentWeek: cur.week });
+      }
+
       if (path === '/api/history' && request.method === 'GET') {
         const idx = (await env.KV.get('history:index', 'json')) || [];
         return json({ weeks: idx });
@@ -415,16 +460,18 @@ export default {
     const t = nowTW();
     const dow = t.getUTCDay();        // 0=日 1=一 … 6=六（台灣當地）
     const hh = t.getUTCHours();       // 台灣當地小時
-    if (hh === 21) {                       // 每天 21:00 台灣：自動重讀來源表
+    if (hh === 21) {                       // 每天 21:00 台灣：自動重讀來源表 + 記錄當日完成度
       await syncSource(env, 'us');
       await syncSource(env, 'asia');
+      await recordDaily(env);
       return;
     }
     const isReminder =
       (hh === 20 && (dow === 1 || dow === 2)) ||           // 週一、二 20:00
       (hh === 17 && (dow === 3 || dow === 4 || dow === 5)); // 週三、四、五 17:30
     if (isReminder) {
-      if (await isHolidayTW(env)) { await rollover(env); return; }  // 台灣例假日略過提醒
+      if (await isHolidayTW(env)) { await rollover(env); return; }  // 台灣例假日：不提醒、不計未更新
+      await recordMisses(env);        // 記錄本次「尚未更新」的人
       await sendReminder(env);
     } else {
       await rollover(env);            // 其他觸發點順手檢查換週
