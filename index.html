@@ -293,7 +293,7 @@ function renderStats(s){
   const live=DATA.items.length?Math.round(DATA.items.reduce((a,it)=>a+(it.progress||0),0)/DATA.items.length):0;
   if(!daily.length||daily[daily.length-1].date!==today) daily.push({date:today,overall:live});
   else daily[daily.length-1].overall=live;
-  box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後30分仍未更新）',missChart(s));
+  box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後30分仍未更新）',missChart(s))+statCard('本週總工時分布',hoursPie());
 }
 function lineChart(data){
   const W=460,H=150,pad=26;
@@ -311,6 +311,30 @@ function lineChart(data){
     '<text x="'+xs(n-1)+'" y="'+(ys(last.overall)-6)+'" font-size="11" fill="var(--us)" text-anchor="end" font-weight="600">'+last.overall+'%</text>'+
     '<text x="'+pad+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)">'+data[0].date.slice(5)+'</text>'+
     '<text x="'+(W-6)+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+last.date.slice(5)+'</text></svg>';
+}
+function hoursPie(){
+  const people=[]; const colorOf={};
+  const usC=['#2563eb','#4f83e0','#6f9beb','#93b6f2','#b6cef7'], asC=['#0f9d77','#43b892'];
+  TEAM.forEach(t=>{ const pal=t.cls==='us'?usC:asC; t.members.forEach((n,i)=>{people.push(n);colorOf[n]=pal[i%pal.length];}); });
+  const tot={}; people.forEach(n=>tot[n]=0);
+  DATA.items.forEach(it=>{ if(tot[it.owner]!=null && it.hours!=null) tot[it.owner]+=it.hours; });
+  const grand=people.reduce((a,n)=>a+tot[n],0);
+  if(!grand) return '<div style="color:var(--muted);font-size:12px">尚無工時資料（來源表填了工時、重讀後就會顯示）。</div>';
+  const r=48,cx=64,cy=64,C=2*Math.PI*r,sw=22; let acc=0;
+  const segs=people.filter(n=>tot[n]>0).map(n=>{
+    const frac=tot[n]/grand, dash=frac*C;
+    const el='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colorOf[n]+'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+(C-dash).toFixed(2)+'" stroke-dashoffset="'+(-acc*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';
+    acc+=frac; return el;
+  }).join('');
+  const donut='<svg viewBox="0 0 128 128" style="width:120px;height:120px;flex:0 0 auto">'+segs+
+    '<text x="'+cx+'" y="'+(cy-1)+'" font-size="17" font-weight="600" fill="var(--txt)" text-anchor="middle">'+(Math.round(grand*10)/10)+'</text>'+
+    '<text x="'+cx+'" y="'+(cy+13)+'" font-size="9" fill="var(--muted)" text-anchor="middle">總工時(h)</text></svg>';
+  const legend='<div style="flex:1;min-width:130px;display:flex;flex-direction:column;gap:3px;font-size:12px">'+
+    people.map(n=>'<div style="display:flex;align-items:center;gap:6px">'+
+      '<span style="width:10px;height:10px;border-radius:2px;background:'+colorOf[n]+';flex:0 0 auto"></span>'+
+      '<span style="flex:1">'+n+'</span>'+
+      '<span style="color:var(--muted);white-space:nowrap">'+(Math.round(tot[n]*10)/10)+'h · '+Math.round(tot[n]/grand*100)+'%</span></div>').join('')+'</div>';
+  return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+donut+legend+'</div>';
 }
 function missChart(s){
   const m=(s.misses&&s.misses[s.currentWeek])||{};
