@@ -25,6 +25,7 @@
   .overall{display:flex;align-items:center;gap:10px;font-size:13px}
   .bigpct{font-size:22px;font-weight:700}
   .wrap{max-width:none;margin:0;padding:18px 24px 60px}
+  .lower{max-width:1200px}
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center}
   .toolbar button,.toolbar select{font:inherit;padding:7px 12px;border:1px solid var(--line);
     background:var(--card);color:var(--txt);border-radius:8px;cursor:pointer}
@@ -76,6 +77,7 @@
 
 <div class="wrap">
   <div id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:16px"></div>
+  <div class="lower">
   <div class="hint">進度即時共用：任何人更新，其他人重新整理（或每 20 秒自動同步）就看得到。每週三 00:00 自動換頁、上週存入「歷史週報」。項目每天 21:00 自動從來源表更新，也可按右側按鈕手動重讀（皆保留已填進度）。</div>
   <div class="legend" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-size:13px;color:var(--txt);flex-wrap:wrap">
     <span style="font-weight:500">團隊顏色：</span>
@@ -95,6 +97,7 @@
   </div>
   <div id="board"></div>
   <div id="history" style="display:none;margin-top:16px"></div>
+  </div>
 </div>
 <footer>市場組工作進度追蹤 · 資料整併自美國企場 / 亞洲企劃 / Arthur 三表（唯讀匯入，未更動來源）· 進度由 Cloudflare 後端即時共用</footer>
 
