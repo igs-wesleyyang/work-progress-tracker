@@ -24,7 +24,7 @@
   .cycle{font-size:13px;color:var(--muted)}
   .overall{display:flex;align-items:center;gap:10px;font-size:13px}
   .bigpct{font-size:22px;font-weight:700}
-  .wrap{max-width:1100px;margin:0 auto;padding:18px 20px 60px}
+  .wrap{max-width:1440px;margin:0 auto;padding:18px 20px 60px}
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center}
   .toolbar button,.toolbar select{font:inherit;padding:7px 12px;border:1px solid var(--line);
     background:var(--card);color:var(--txt);border-radius:8px;cursor:pointer}
@@ -296,7 +296,7 @@ function renderStats(s){
   box.innerHTML=statCard('每日完成度 (%)',lineChart(daily))+statCard('本週未更新次數（提醒後30分仍未更新）',missChart(s))+statCard('本週總工時分布',hoursPie());
 }
 function lineChart(data){
-  const W=460,H=150,pad=26;
+  const W=460,H=210,pad=26;
   if(!data.length) return '<div style="color:var(--muted);font-size:12px">尚無資料，今晚 21:00 起累積。</div>';
   const n=data.length;
   const xs=i=> pad+(n===1?(W-2*pad)/2:i*(W-2*pad)/(n-1));
@@ -326,7 +326,7 @@ function hoursPie(){
     const el='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colorOf[n]+'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+(C-dash).toFixed(2)+'" stroke-dashoffset="'+(-acc*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';
     acc+=frac; return el;
   }).join('');
-  const donut='<svg viewBox="0 0 128 128" style="width:120px;height:120px;flex:0 0 auto">'+segs+
+  const donut='<svg viewBox="0 0 128 128" style="width:160px;height:160px;flex:0 0 auto">'+segs+
     '<text x="'+cx+'" y="'+(cy-1)+'" font-size="17" font-weight="600" fill="var(--txt)" text-anchor="middle">'+(Math.round(grand*10)/10)+'</text>'+
     '<text x="'+cx+'" y="'+(cy+13)+'" font-size="9" fill="var(--muted)" text-anchor="middle">總工時(h)</text></svg>';
   const legend='<div style="flex:1;min-width:130px;display:flex;flex-direction:column;gap:3px;font-size:12px">'+
@@ -341,7 +341,7 @@ function missChart(s){
   const people=[]; TEAM.forEach(t=>t.members.forEach(name=>people.push({name,color:t.color})));
   const vals=people.map(p=>({name:p.name,color:p.color,c:m[p.name]||0}));
   const max=Math.max(3,...vals.map(v=>v.c));
-  const W=460,H=150,pad=16,bw=(W-2*pad)/vals.length;
+  const W=460,H=210,pad=16,bw=(W-2*pad)/vals.length;
   const bars=vals.map((v,i)=>{
     const bh=(v.c/max)*(H-44),x=pad+i*bw,y=(H-24)-bh;
     return '<rect x="'+(x+bw*0.15).toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+(bw*0.7).toFixed(1)+'" height="'+Math.max(0,bh).toFixed(1)+'" rx="3" fill="'+v.color+'"/>'+
