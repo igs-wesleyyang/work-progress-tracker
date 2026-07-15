@@ -284,6 +284,15 @@ async function loadStats(){
   try{ const s=await (await fetch(API+'/api/stats',{cache:'no-store'})).json(); renderStats(s); }catch(e){}
 }
 function refreshAll(){ loadState(true); loadStats(); }
+function tip(e,text){
+  let t=document.getElementById('tip');
+  if(!t){ t=document.createElement('div'); t.id='tip';
+    t.style.cssText='position:fixed;pointer-events:none;z-index:999;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--txt);box-shadow:0 3px 10px rgba(0,0,0,.28);white-space:nowrap';
+    document.body.appendChild(t); }
+  t.textContent=text; t.style.display='block';
+  t.style.left=(e.clientX+14)+'px'; t.style.top=(e.clientY+14)+'px';
+}
+function hideTip(){ const t=document.getElementById('tip'); if(t) t.style.display='none'; }
 function statCard(title,inner){
   return '<div style="background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px">'+
     '<div style="font-size:13px;font-weight:600;margin-bottom:8px">'+title+'</div>'+inner+'</div>';
@@ -307,10 +316,11 @@ function lineChart(data){
   const pts=data.map((d,i)=>xs(i).toFixed(1)+','+ys(d.overall).toFixed(1));
   const grid=[0,50,100].map(v=>'<line x1="'+pad+'" y1="'+ys(v)+'" x2="'+(W-6)+'" y2="'+ys(v)+'" stroke="var(--line)"/><text x="2" y="'+(ys(v)+3)+'" font-size="9" fill="var(--muted)">'+v+'</text>').join('');
   const dots=data.map((d,i)=>'<circle cx="'+xs(i)+'" cy="'+ys(d.overall)+'" r="2.5" fill="var(--us)"/>').join('');
+  const hits=data.map((d,i)=>'<circle cx="'+xs(i)+'" cy="'+ys(d.overall)+'" r="12" fill="transparent" style="cursor:pointer" onmousemove="tip(event,\''+d.date.slice(5)+' · '+d.overall+'%\')" onmouseleave="hideTip()"/>').join('');
   const last=data[n-1];
   return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+grid+
     '<polygon points="'+pad+','+ys(0)+' '+pts.join(' ')+' '+xs(n-1)+','+ys(0)+'" fill="var(--us)" opacity="0.08"/>'+
-    '<polyline points="'+pts.join(' ')+'" fill="none" stroke="var(--us)" stroke-width="2"/>'+dots+
+    '<polyline points="'+pts.join(' ')+'" fill="none" stroke="var(--us)" stroke-width="2"/>'+dots+hits+
     '<text x="'+xs(n-1)+'" y="'+(ys(last.overall)-6)+'" font-size="11" fill="var(--us)" text-anchor="end" font-weight="600">'+last.overall+'%</text>'+
     '<text x="'+pad+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)">'+data[0].date.slice(5)+'</text>'+
     '<text x="'+(W-6)+'" y="'+(H-4)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+last.date.slice(5)+'</text></svg>';
@@ -325,8 +335,8 @@ function hoursPie(){
   if(!grand) return '<div style="color:var(--muted);font-size:12px">尚無工時資料（來源表填了工時、重讀後就會顯示）。</div>';
   const r=48,cx=64,cy=64,C=2*Math.PI*r,sw=22; let acc=0;
   const segs=people.filter(n=>tot[n]>0).map(n=>{
-    const frac=tot[n]/grand, dash=frac*C;
-    const el='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colorOf[n]+'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+(C-dash).toFixed(2)+'" stroke-dashoffset="'+(-acc*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';
+    const frac=tot[n]/grand, dash=frac*C, pct=Math.round(tot[n]/grand*100), hh=Math.round(tot[n]*10)/10;
+    const el='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colorOf[n]+'" stroke-width="'+sw+'" stroke-dasharray="'+dash.toFixed(2)+' '+(C-dash).toFixed(2)+'" stroke-dashoffset="'+(-acc*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')" style="cursor:pointer" onmousemove="tip(event,\''+n+' · '+hh+'h · '+pct+'%\')" onmouseleave="hideTip()"/>';
     acc+=frac; return el;
   }).join('');
   const donut='<svg viewBox="0 0 128 128" style="width:160px;height:160px;flex:0 0 auto">'+segs+
@@ -349,7 +359,8 @@ function missChart(s){
     const bh=(v.c/max)*(H-44),x=pad+i*bw,y=(H-24)-bh;
     return '<rect x="'+(x+bw*0.15).toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+(bw*0.7).toFixed(1)+'" height="'+Math.max(0,bh).toFixed(1)+'" rx="3" fill="'+v.color+'"/>'+
       '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-3).toFixed(1)+'" font-size="10" fill="var(--txt)" text-anchor="middle">'+v.c+'</text>'+
-      '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-8)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+v.name+'</text>';
+      '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-8)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+v.name+'</text>'+
+      '<rect x="'+x.toFixed(1)+'" y="0" width="'+bw.toFixed(1)+'" height="'+(H-24)+'" fill="transparent" style="cursor:pointer" onmousemove="tip(event,\''+v.name+' · '+v.c+' 次\')" onmouseleave="hideTip()"/>';
   }).join('');
   const note=Object.keys(m).length?'':'<text x="'+(W/2)+'" y="14" font-size="10" fill="var(--muted)" text-anchor="middle">本週提醒尚未發送，之後開始累計</text>';
   return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+note+bars+'</svg>';
