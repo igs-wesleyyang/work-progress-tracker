@@ -111,6 +111,16 @@ function cycleTW(base) {
   return { s, e, label: `${s.getUTCFullYear()}/${fmtMD(s)}~${fmtMD(e)}` };
 }
 
+// 各團隊的週期邊界：亞洲＝週三 00:00；美國＝週三 12:00（台灣）
+function cycleForTeam(team) {
+  const offMs = team === '美國' ? 12 * 3600 * 1000 : 0;
+  const base = new Date(nowTW().getTime() - offMs);
+  const day = base.getUTCDay(); const diff = (day - 3 + 7) % 7;
+  const s = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() - diff));
+  const e = new Date(s); e.setUTCDate(s.getUTCDate() + 6);
+  return { label: `${s.getUTCFullYear()}/${fmtMD(s)}~${fmtMD(e)}` };
+}
+
 function seedItems() {
   return SEED.map((r, i) => ({
     id: `${i}_${r[1]}_${r[3]}`.slice(0, 80),
@@ -130,19 +140,32 @@ async function getCurrent(env) {
   return cur;
 }
 
+// 逐團隊換週（各自的邊界時間）：封存該團隊上週、進度歸零、工時重置
 async function rollover(env) {
   const cur = await getCurrent(env);
-  const newWk = cycleTW().label;
-  if (cur.week === newWk) return { rolled: false, week: newWk };
-  // 封存上一週
-  await env.KV.put(`history:${cur.week}`, JSON.stringify(cur));
-  const idx = (await env.KV.get('history:index', 'json')) || [];
-  if (!idx.includes(cur.week)) { idx.unshift(cur.week); await env.KV.put('history:index', JSON.stringify(idx)); }
-  // 開新一週：項目保留、進度歸零、工時重置回來源預計工時（無則清空）
-  const items = cur.items.map(it => ({ ...it, progress: 0, updated: '', hours: it.plannedHours != null ? it.plannedHours : null }));
-  const next = { week: newWk, items };
-  await env.KV.put('current', JSON.stringify(next));
-  return { rolled: true, week: newWk, archived: cur.week };
+  cur.teamWeek = cur.teamWeek || {};
+  let dirty = false;
+  for (const team of Object.keys(TEAMS)) {
+    const wk = cycleForTeam(team).label;
+    const prev = cur.teamWeek[team];
+    if (prev === undefined) { cur.teamWeek[team] = wk; dirty = true; continue; }
+    if (prev !== wk) {
+      const teamItems = cur.items.filter(it => it.team === team);
+      const snapKey = 'history:' + prev;
+      let snap = await env.KV.get(snapKey, 'json'); if (!snap) snap = { week: prev, items: [] };
+      snap.items = snap.items.filter(it => it.team !== team).concat(teamItems);
+      await env.KV.put(snapKey, JSON.stringify(snap));
+      const idx = (await env.KV.get('history:index', 'json')) || [];
+      if (!idx.includes(prev)) { idx.unshift(prev); await env.KV.put('history:index', JSON.stringify(idx)); }
+      cur.items = cur.items.map(it => it.team === team ? { ...it, progress: 0, updated: '', hours: it.plannedHours != null ? it.plannedHours : null } : it);
+      cur.teamWeek[team] = wk;
+      dirty = true;
+    }
+  }
+  const display = cycleForTeam('亞洲').label;
+  if (cur.week !== display) { cur.week = display; dirty = true; }
+  if (dirty) await env.KV.put('current', JSON.stringify(cur));
+  return { ok: true, teamWeek: cur.teamWeek };
 }
 
 // ===== Telegram 提醒 =====
@@ -299,27 +322,31 @@ function asiaTag(title) {
 // 美國企場：人名在 A 欄當區塊標題，項目列 B=標籤 C=工作項目 D=備註；取每人「最後一次出現」的區塊
 async function parseUS(env) {
   const rows = await sheetValues(env, SOURCE_IDS.美國企場, '美國企場每週工作!A1:D');
-  const BOUND = new Set(['10', '聿緯', '張譯', '貞貞', 'Abbie', '亞瑟']);
-  const OUT = { '聿緯': '聿緯', '張譯': '張譯', '貞貞': '貞貞', 'Abbie': 'Abbie', '亞瑟': 'Arthur' };
-  // 人名標題列＝A欄是成員名 且 C欄(工作項目)為空；項目列的 A 欄則是工時數字或空白
-  const isHeader = (r) => { const a = ((r[0] || '') + '').trim(); const c = ((r[2] || '') + '').trim(); return BOUND.has(a) && !c; };
+  const NAMES = { '聿緯': '聿緯', '張譯': '張譯', '貞貞': '貞貞', 'Abbie': 'Abbie', '亞瑟': 'Arthur' };
+  const isName = a => Object.prototype.hasOwnProperty.call(NAMES, a);
+  // 標題列＝A欄是成員名（不論 C 欄是否有日期）；項目列 A 欄為工時數字或空白
+  const isBoundary = (r) => {
+    const a = ((r[0] || '') + '').trim(), c = ((r[2] || '') + '').trim();
+    if (isName(a)) return true;
+    if (a === '10' && /、/.test(c)) return true;                     // 小組長標題列（C欄日期清單）
+    if (/\d{1,4}[-/]\d{1,2}[-/]?\d{0,2}\s*~/.test(a)) return true;   // 週區間列
+    return false;
+  };
   const lastIdx = {};
-  rows.forEach((r, i) => { if (isHeader(r)) lastIdx[((r[0] || '') + '').trim()] = i; });
+  rows.forEach((r, i) => { const a = ((r[0] || '') + '').trim(); if (isName(a)) lastIdx[a] = i; });
   const items = [];
-  for (const name of Object.keys(OUT)) {
+  for (const name of Object.keys(NAMES)) {
     const s = lastIdx[name]; if (s == null) continue;
     let empties = 0;
     for (let i = s + 1; i < rows.length; i++) {
       const r = rows[i] || [];
-      if (isHeader(r)) break;
-      const a = ((r[0] || '') + '').trim();
-      if (/\d{1,4}[-/]\d{1,2}[-/]?\d{0,2}\s*~/.test(a)) break;   // 週區間標題
-      const tag = ((r[1] || '') + '').trim(), title = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
+      if (isBoundary(r)) break;
+      const a = ((r[0] || '') + '').trim(), tag = ((r[1] || '') + '').trim(), title = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
       if (!a && !tag && !title && !note) { if (++empties >= 4) break; continue; }
       empties = 0;
       if (!title) continue;
       const h = parseFloat(a);          // A 欄＝工時
-      items.push({ team: '美國', owner: OUT[name], tag, title, hours: isNaN(h) ? null : h, note });
+      items.push({ team: '美國', owner: NAMES[name], tag, title, hours: isNaN(h) ? null : h, note });
     }
   }
   return items;
