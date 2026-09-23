@@ -319,58 +319,73 @@ function asiaTag(title) {
   if (/會議/.test(title)) return '會議';
   return '企劃';
 }
-// 美國企場：人名在 A 欄當區塊標題，項目列 B=標籤 C=工作項目 D=備註；取每人「最後一次出現」的區塊
+// 美國企場：人名在 A 欄當區塊標題，項目列 A=工時 B=標籤 C=工作項目 D=備註
+// 取每人「最近一個有內容的區塊」（最新那週若是空模板就往前找）
 async function parseUS(env) {
   const rows = await sheetValues(env, SOURCE_IDS.美國企場, '美國企場每週工作!A1:D');
   const NAMES = { '聿緯': '聿緯', '張譯': '張譯', '貞貞': '貞貞', 'Abbie': 'Abbie', '亞瑟': 'Arthur' };
   const isName = a => Object.prototype.hasOwnProperty.call(NAMES, a);
-  // 標題列＝A欄是成員名（不論 C 欄是否有日期）；項目列 A 欄為工時數字或空白
   const isBoundary = (r) => {
-    const a = ((r[0] || '') + '').trim(), c = ((r[2] || '') + '').trim();
+    const a = ((r[0] || '') + '').trim(), b = ((r[1] || '') + '').trim(), c = ((r[2] || '') + '').trim();
     if (isName(a)) return true;
-    if (a === '10' && /、/.test(c)) return true;                     // 小組長標題列（C欄日期清單）
+    if (a === '10' && !b) return true;                              // 小組長標題列（無標籤）
+    if (a === '10' && /、/.test(c)) return true;
     if (/\d{1,4}[-/]\d{1,2}[-/]?\d{0,2}\s*~/.test(a)) return true;   // 週區間列
     return false;
   };
-  const lastIdx = {};
-  rows.forEach((r, i) => { const a = ((r[0] || '') + '').trim(); if (isName(a)) lastIdx[a] = i; });
-  const items = [];
-  for (const name of Object.keys(NAMES)) {
-    const s = lastIdx[name]; if (s == null) continue;
-    let empties = 0;
+  const collect = (s, owner) => {
+    const out = []; let empties = 0;
     for (let i = s + 1; i < rows.length; i++) {
       const r = rows[i] || [];
       if (isBoundary(r)) break;
       const a = ((r[0] || '') + '').trim(), tag = ((r[1] || '') + '').trim(), title = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
-      if (!a && !tag && !title && !note) { if (++empties >= 4) break; continue; }
+      if (!a && !tag && !title && !note) { if (++empties >= 6) break; continue; }
       empties = 0;
       if (!title) continue;
       const h = parseFloat(a);          // A 欄＝工時
-      items.push({ team: '美國', owner: NAMES[name], tag, title, hours: isNaN(h) ? null : h, note });
+      out.push({ team: '美國', owner, tag, title, hours: isNaN(h) ? null : h, note });
+    }
+    return out;
+  };
+  const idxs = {}; Object.keys(NAMES).forEach(n => idxs[n] = []);
+  rows.forEach((r, i) => { const a = ((r[0] || '') + '').trim(); if (isName(a)) idxs[a].push(i); });
+  const items = [];
+  for (const name of Object.keys(NAMES)) {
+    for (let k = idxs[name].length - 1; k >= 0; k--) {
+      const got = collect(idxs[name][k], NAMES[name]);
+      if (got.length) { items.push(...got); break; }   // 最近一個有內容的區塊
     }
   }
   return items;
 }
 // 亞洲企劃：人名在 B 欄當標題，項目列 B=工作項目 C=工時 D=工作內容
+// 取每人「最近一個有內容的區塊」（最新那週若是空模板就往前找）
 async function parseAsia(env) {
   const rows = await sheetValues(env, SOURCE_IDS.亞洲市場企劃, '企劃工作總攬!A1:D');
-  const BOUND = new Set(['皓皓', 'Kevin']);
-  const lastIdx = {};
-  rows.forEach((r, i) => { const b = ((r[1] || '') + '').trim(); if (BOUND.has(b)) lastIdx[b] = i; });
-  const items = [];
-  for (const name of ['皓皓', 'Kevin']) {
-    const s = lastIdx[name]; if (s == null) continue;
-    let empties = 0;
+  const NAMES = ['皓皓', 'Kevin'];
+  const isName = b => NAMES.includes(b);
+  const collect = (s, owner) => {
+    const out = []; let empties = 0;
     for (let i = s + 1; i < rows.length; i++) {
       const r = rows[i] || [];
       const b = ((r[1] || '') + '').trim();
-      if (BOUND.has(b)) break;
+      if (isName(b)) break;
       const title = b, hraw = ((r[2] || '') + '').trim(), note = ((r[3] || '') + '').trim();
-      if (!title && !hraw && !note) { if (++empties >= 4) break; continue; }
+      if (!title && !hraw && !note) { if (++empties >= 6) break; continue; }
       empties = 0;
       if (!title) continue;
       const h = parseFloat(hraw);
-      items.push({ team: '亞洲', owner: name, tag: asiaTag(title), title, hours: isNaN(h) ? null : h, note });
+      out.push({ team: '亞洲', owner, tag: asiaTag(title), title, hours: isNaN(h) ? null : h, note });
+    }
+    return out;
+  };
+  const idxs = {}; NAMES.forEach(n => idxs[n] = []);
+  rows.forEach((r, i) => { const b = ((r[1] || '') + '').trim(); if (isName(b)) idxs[b].push(i); });
+  const items = [];
+  for (const name of NAMES) {
+    for (let k = idxs[name].length - 1; k >= 0; k--) {
+      const got = collect(idxs[name][k], name);
+      if (got.length) { items.push(...got); break; }
     }
   }
   return items;
